@@ -1,4 +1,7 @@
-﻿using ConsoleApp1;
+﻿using System.Security.Cryptography;
+using ConsoleApp1;
+using System.Text;
+using System.Xml.Linq;
 
 namespace ConsoleApp1
 {
@@ -30,9 +33,10 @@ namespace ConsoleApp1
                         string name = Console.ReadLine();
                         Console.WriteLine("Digite o email do item:");
                         string email = Console.ReadLine();
-                        items.Add(new Item { Id = GetNextId(items), Name = name, Email = email });
-                        UpdateHistory(items, history);
-                        Console.WriteLine("Item inserido com sucesso!");
+
+                        items.Add(new Item { Id = GetNextId(items), Nome = name, Email = email });
+                        if(UpdateHistory(items, history))
+                            Console.WriteLine("Item inserido com sucesso!");
                         break;
                     case "A":
                         // Atualize um item existente
@@ -45,11 +49,11 @@ namespace ConsoleApp1
                             break;
                         }
                         Console.WriteLine("Digite o novo nome do item:");
-                        item.Name = Console.ReadLine();
+                        item.Nome = Console.ReadLine();
                         Console.WriteLine("Digite o novo email do item:");
                         item.Email = Console.ReadLine();
-                        UpdateHistory(items, history);
-                        Console.WriteLine("Item atualizado com sucesso!");
+                        if(UpdateHistory(items, history))
+                            Console.WriteLine("Item atualizado com sucesso!");
                         break;
                     case "E":
                         // Exclua um item existente
@@ -62,14 +66,14 @@ namespace ConsoleApp1
                             break;
                         }
                         items.Remove(item);
-                        UpdateHistory(items, history);
-                        Console.WriteLine("Item excluído com sucesso!");
+                        if(UpdateHistory(items, history))
+                            Console.WriteLine("Item excluído com sucesso!");
                         break;
                     case "U":
                         // Liste ultima versão
-                        foreach (Item i in items)
+                        foreach (Item i in GetLatestVersions(history))
                         {
-                            Console.WriteLine($"{i.Id}: {i.Name} ({i.Email})");
+                            Console.WriteLine($"{i.Id}: {i.Nome} ({i.Email})");
                         }
                         break;
                     case "L":
@@ -89,26 +93,38 @@ namespace ConsoleApp1
             }
         }
 
+        private static string HashEncode(string input)
+        {
+            byte[] inputBytes = Encoding.UTF8.GetBytes(input);
+
+            using (SHA1 sha1 = SHA1.Create())
+            {
+                byte[] hashBytes = sha1.ComputeHash(inputBytes);
+                string hash = BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
+                return hash;
+            }
+        }
+
         public static void Testar(List<Item> items, List<HistoryRecord> history)
         {
             // Insira um novo item na lista
-            items.Add(new Item { Id = 1, Name = "Item 1", Email = "item1@example.com" });
-            UpdateHistory(items, history);
+            items.Add(new Item { Id = 1, Nome = "Item 1", Email = "item1@example.com" });
+            if(UpdateHistory(items, history));
             Console.WriteLine("Inserido item 1");
             Listar(items, history);
 
 
             // Atualize o item na lista
-            items[0].Name = "Item 1 atualizado";
+            items[0].Nome = "Item 1 atualizado";
             items[0].Email = "item1-updated@example.com";
-            UpdateHistory(items, history);
+            if(UpdateHistory(items, history));
             Console.WriteLine("Atualizado item 1");
             Listar(items, history);
 
 
             // Exclua o item da lista
             items.RemoveAt(0);
-            UpdateHistory(items, history);
+            if(UpdateHistory(items, history));
             Console.WriteLine("Excluído item 1");
 
             // Obtenha a última versão de cada item na lista
@@ -131,27 +147,39 @@ namespace ConsoleApp1
             if(items?.Any() ==false)
                 Console.WriteLine("Não há nenhum item.");
 
-            List<Item> latestVersions = GetLatestVersions(items, history);
+            List<Item> latestVersions = GetLatestVersions(history);
             foreach (Item item in latestVersions)
             {
-                Console.WriteLine($"{item.Id}: {item.Name} ({item.Email})");
+                Console.WriteLine($"{item.Id}: {item.Nome} ({item.Email})");
             }
         }
 
-        public static void UpdateHistory(List<Item> items, List<HistoryRecord> history)
+        public static bool UpdateHistory(List<Item> items, List<HistoryRecord> history)
         {
+            var tempHash = HashEncode(string.Join(';', items.Select(x => x.Nome + "-" + x.Email)));
+            Console.WriteLine($"Hash input: {tempHash}");
+
+            var actualHash = HashEncode(string.Join(';', GetLatestVersions(history).Select(x => x.Nome + "-" + x.Email)));
+            Console.WriteLine($"Hash atual: {actualHash}");
+
+            if (history.Any() && tempHash == actualHash)
+            {
+                Console.WriteLine("Não há diferenças.");
+                return false;
+            }
+
             // Adicione um registro de histórico para cada item na lista
             foreach (Item item in items)
             {
                 HistoryRecord? lastRecord = history.LastOrDefault(r => r.ItemId == item.Id);
 
                 // Se o item foi modificado, adicione um novo registro de histórico
-                if (lastRecord == null || lastRecord.Name != item.Name || lastRecord.Email != item.Email)
+                if (lastRecord == null || lastRecord.Name != item.Nome || lastRecord.Email != item.Email)
                 {
                     history.Add(new HistoryRecord
                     {
                         ItemId = item.Id,
-                        Name = item.Name,
+                        Name = item.Nome,
                         Email = item.Email,
                         Timestamp = DateTime.Now,
                         Type = lastRecord == null ? HistoryType.Novo : HistoryType.Modificado
@@ -174,43 +202,27 @@ namespace ConsoleApp1
                     });
                 }
             }
+
+            return true;
         }
 
-        static List<Item> GetLatestVersions(List<Item> items, List<HistoryRecord> history)
+        static List<Item> GetLatestVersions(List<HistoryRecord> history)
         {
-            List<Item> latestVersions = new List<Item>();
-            foreach (Item item in items)
-            {
-                // Encontre a última alteração ou inserção para este item
-                HistoryRecord mostRecentChange = history
-                    .Where(r => r.ItemId == item.Id)
+            return history
                     .OrderByDescending(r => r.Timestamp)
-                    .FirstOrDefault(r => r.Type == HistoryType.Novo || r.Type == HistoryType.Modificado);
-
-                // Se não houver alterações ou inserções para este item, isso significa que a última versão é a atual
-                if (mostRecentChange == null)
-                {
-                    latestVersions.Add(item);
-                }
-                // Se houver alterações ou inserções, adicione a última versão ao resultado
-                else
-                {
-                    latestVersions.Add(new Item
+                    .DistinctBy(x => x.ItemId).Select(x => new Item()
                     {
-                        Id = mostRecentChange.ItemId,
-                        Name = mostRecentChange.Name,
-                        Email = mostRecentChange.Email
-                    });
-                }
-            }
-            return latestVersions;
+                        Email = x.Email,
+                        Id = x.ItemId,
+                        Nome = x.Name
+                    }).ToList();
         }
     }
 
     class Item
     {
         public int Id { get; set; }
-        public string Name { get; set; }
+        public string Nome { get; set; }
         public string Email { get; set; }
     }
 
